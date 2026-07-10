@@ -55,6 +55,10 @@ class AddFriendBody(BaseModel):
     code: str
 
 
+class RespondBody(BaseModel):
+    username: str
+
+
 # ------------------------------------------------------------------ Helpers
 
 def current_user(authorization: str = Header(default="")) -> str:
@@ -191,16 +195,49 @@ def put_records(body: RecordsBody, username: str = Depends(current_user)):
 
 @app.post("/friends/add")
 def add_friend(body: AddFriendBody, username: str = Depends(current_user)):
+    """Send a friend request (the recipient must accept)."""
     code = body.code.strip()
     target = users.find_one({"friendCode": code})
     if not target:
         raise HTTPException(status_code=404, detail="No one has that friend code")
-    if target["_id"] == username:
+    tname = target["_id"]
+    if tname == username:
         raise HTTPException(status_code=400, detail="That's your own code")
-    # Mutual friendship.
-    users.update_one({"_id": username}, {"$addToSet": {"friends": target["_id"]}})
-    users.update_one({"_id": target["_id"]}, {"$addToSet": {"friends": username}})
-    return {"added": target["_id"]}
+    me_doc = users.find_one({"_id": username}) or {}
+    if tname in me_doc.get("friends", []):
+        raise HTTPException(status_code=400, detail="You're already friends")
+    if username in target.get("incomingRequests", []):
+        raise HTTPException(status_code=400, detail="Request already sent")
+    users.update_one({"_id": tname}, {"$addToSet": {"incomingRequests": username}})
+    return {"requested": tname}
+
+
+@app.get("/friends/requests")
+def friend_requests(username: str = Depends(current_user)):
+    """Usernames of people who have requested to be your friend."""
+    user = users.find_one({"_id": username}) or {}
+    return {"requests": user.get("incomingRequests", [])}
+
+
+@app.post("/friends/accept")
+def accept_friend(body: RespondBody, username: str = Depends(current_user)):
+    requester = body.username.strip().lower()
+    user = users.find_one({"_id": username}) or {}
+    if requester not in user.get("incomingRequests", []):
+        raise HTTPException(status_code=404, detail="No such friend request")
+    users.update_one(
+        {"_id": username},
+        {"$pull": {"incomingRequests": requester}, "$addToSet": {"friends": requester}},
+    )
+    users.update_one({"_id": requester}, {"$addToSet": {"friends": username}})
+    return {"accepted": requester}
+
+
+@app.post("/friends/decline")
+def decline_friend(body: RespondBody, username: str = Depends(current_user)):
+    requester = body.username.strip().lower()
+    users.update_one({"_id": username}, {"$pull": {"incomingRequests": requester}})
+    return {"declined": requester}
 
 
 @app.get("/friends")
