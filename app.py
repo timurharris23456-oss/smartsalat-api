@@ -8,8 +8,8 @@ Run:
   uvicorn app:app --host 0.0.0.0 --port 8000
 """
 
+import hashlib
 import os
-import random
 import secrets
 from datetime import date, datetime, timedelta, timezone
 
@@ -71,11 +71,15 @@ def current_user(authorization: str = Header(default="")) -> str:
     return session["username"]
 
 
-def new_friend_code() -> str:
-    """A 6-digit code (100000–999999) not already assigned to another user."""
-    for _ in range(25):
-        code = str(random.randint(100000, 999999))
-        if not users.find_one({"friendCode": code}):
+def code_for_username(name: str) -> str:
+    """A 6-digit code derived from the username — stable for a given username,
+    and unique (re-derived with a salt on the rare collision)."""
+    for i in range(50):
+        seed = name if i == 0 else f"{name}#{i}"
+        digest = hashlib.sha256(seed.encode()).hexdigest()
+        code = str(100000 + int(digest, 16) % 900000)
+        existing = users.find_one({"friendCode": code})
+        if existing is None or existing["_id"] == name:
             return code
     raise HTTPException(status_code=500, detail="Could not allocate a friend code")
 
@@ -109,7 +113,7 @@ def register(creds: Credentials):
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     if users.find_one({"_id": username}):
         raise HTTPException(status_code=409, detail="That username is taken")
-    friend_code = new_friend_code()
+    friend_code = code_for_username(username)
     users.insert_one({
         "_id": username,
         "passwordHash": bcrypt.hashpw(creds.password.encode(), bcrypt.gensalt()),
@@ -129,7 +133,7 @@ def login(creds: Credentials):
     # Backfill a friend code for accounts created before codes existed.
     friend_code = user.get("friendCode")
     if not friend_code:
-        friend_code = new_friend_code()
+        friend_code = code_for_username(username)
         users.update_one({"_id": username}, {"$set": {"friendCode": friend_code}})
     token = secrets.token_urlsafe(24)
     sessions.insert_one({
