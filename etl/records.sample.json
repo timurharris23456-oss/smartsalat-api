@@ -1,0 +1,5 @@
+{
+  "2026-07-04": { "fard": ["fajr"], "sunnah": [], "witr": false },
+  "2026-07-05": { "fard": ["dhuhr"], "sunnah": [], "witr": false },
+  "2026-07-06": { "fard": ["asr"], "sunnah": ["fajr"], "witr": true }
+}

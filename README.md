@@ -1,37 +1,29 @@
-# SmartSalat API
+# SmartSalat
 
-Username/password accounts + per-account prayer-record sync, backed by MongoDB.
-This is what makes "log in anywhere and your data is there" work — accounts and
-records live on the server, not the phone.
+A prayer-tracking iOS app: mark daily prayers, prayer times & Qibla for your
+location, an Ayah of the day, prayer-time notifications, and social streaks with
+friends. This repository is a monorepo containing the app, its backend, and a
+data pipeline.
 
-## Endpoints
-| Method | Path        | Auth   | Purpose                                  |
-|--------|-------------|--------|------------------------------------------|
-| POST   | `/register` | —      | Create an account (bcrypt-hashed password) |
-| POST   | `/login`    | —      | Returns a bearer `token`                 |
-| POST   | `/logout`   | Bearer | Invalidates the current session          |
-| GET    | `/records`  | Bearer | The account's prayer records             |
-| PUT    | `/records`  | Bearer | Upsert the account's records             |
-| GET    | `/health`   | —      | Liveness check                           |
+## Structure
 
-Collections used in the `smartsalat` DB: `users`, `sessions`, `prayer_records`.
+| Folder | What it is |
+|---|---|
+| `salattracker/` | The SwiftUI iOS app (Xcode project). |
+| `backend/` | FastAPI + MongoDB server — accounts, per-account prayer-record sync, and friends. Deployed on Render. |
+| `etl/` | A Python ETL that extracts prayer records and loads them into MongoDB. |
 
-## Run locally (for the iOS Simulator)
+## iOS app
 
-```bash
-cd backend
-pip3 install -r requirements.txt
-export MONGODB_URI="mongodb+srv://USER:PASS@cluster.xxxx.mongodb.net"
-uvicorn app:app --host 0.0.0.0 --port 8000
-```
+Open `salattracker/salattracker.xcodeproj` in Xcode and run. The app talks to the
+backend URL in `salattracker/salattracker/Info.plist` (`APIBaseURL`).
 
-The iOS Simulator reaches this at `http://localhost:8000` (already configured in
-the app's `APIClient`).
+## Backend
 
-## For a real device / production
-- **Deploy** it (Render, Railway, Fly.io) and point the app's `APIClient.baseURL`
-  at the HTTPS URL.
-- Add the host's IP to Atlas → Network Access.
-- Hardening still to do: HTTPS/TLS (required off-simulator), token expiry,
-  rate-limiting on `/login`, and storing the app's token in the Keychain
-  (currently UserDefaults for the demo).
+See [`backend/README.md`](backend/README.md) and [`backend/DEPLOY.md`](backend/DEPLOY.md).
+Render deploys from the `backend/` subfolder (configured via `render.yaml`
+`rootDir: backend`). It needs a `MONGODB_URI` environment variable.
+
+## ETL
+
+See [`etl/README.md`](etl/README.md).
