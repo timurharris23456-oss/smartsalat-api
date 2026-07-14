@@ -57,14 +57,18 @@ struct APIClient {
 
     // MARK: - Auth
 
+    /// The device's current offset from UTC, in minutes — so the server can
+    /// compute the user's local "today" for streaks and friend progress.
+    private var tzOffsetMinutes: Int { TimeZone.current.secondsFromGMT() / 60 }
+
     func register(username: String, password: String) async throws {
         _ = try await send("/register", method: "POST",
-                           body: ["username": username, "password": password])
+                           body: ["username": username, "password": password, "tzOffset": tzOffsetMinutes])
     }
 
     func login(username: String, password: String) async throws -> AuthResponse {
         let data = try await send("/login", method: "POST",
-                                  body: ["username": username, "password": password])
+                                  body: ["username": username, "password": password, "tzOffset": tzOffsetMinutes])
         return try JSONDecoder().decode(AuthResponse.self, from: data)
     }
 

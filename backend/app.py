@@ -39,6 +39,7 @@ app = FastAPI(title="SmartSalat API")
 class Credentials(BaseModel):
     username: str
     password: str
+    tzOffset: int = 0   # the client's minutes-from-UTC, so "today" is computed in the user's local time
 
 
 class Day(BaseModel):
@@ -80,10 +81,15 @@ def new_friend_code() -> str:
     raise HTTPException(status_code=500, detail="Could not allocate a friend code")
 
 
-def streak_from_records(day_records: dict) -> int:
-    """Consecutive days ending today with >=1 fard prayer."""
+def local_today(tz_offset_minutes: int):
+    """The user's current local date, given their minutes-from-UTC offset."""
+    return (datetime.now(timezone.utc) + timedelta(minutes=tz_offset_minutes)).date()
+
+
+def streak_from_records(day_records: dict, today) -> int:
+    """Consecutive days ending on `today` (the user's local date) with >=1 fard."""
     counting = {d for d, r in day_records.items() if len(r.get("fard", [])) >= 1}
-    day = date.today()
+    day = today
     if day.isoformat() not in counting:
         day -= timedelta(days=1)
     streak = 0
@@ -97,7 +103,7 @@ def streak_from_records(day_records: dict) -> int:
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "version": "2-tz"}
 
 
 @app.post("/register", status_code=201)
@@ -115,6 +121,7 @@ def register(creds: Credentials):
         "passwordHash": bcrypt.hashpw(creds.password.encode(), bcrypt.gensalt()),
         "friendCode": friend_code,
         "friends": [],
+        "tzOffset": creds.tzOffset,
         "createdAt": datetime.now(timezone.utc),
     })
     return {"username": username, "friendCode": friend_code}
@@ -131,6 +138,8 @@ def login(creds: Credentials):
     if not friend_code:
         friend_code = new_friend_code()
         users.update_one({"_id": username}, {"$set": {"friendCode": friend_code}})
+    # Keep the user's timezone offset current so friend "today" is accurate.
+    users.update_one({"_id": username}, {"$set": {"tzOffset": creds.tzOffset}})
     token = secrets.token_urlsafe(24)
     sessions.insert_one({
         "_id": token,
@@ -251,14 +260,17 @@ def list_friends(username: str = Depends(current_user)):
     for rec in records_col.find({"userId": {"$in": friend_names}}):
         by_user.setdefault(rec["userId"], {})[rec["date"]] = rec
 
-    today = date.today().isoformat()
+    # Each friend's "today" is computed in their own timezone.
+    friend_docs = {u["_id"]: u for u in users.find({"_id": {"$in": friend_names}})}
+
     friends = []
     for name in friend_names:
         day_records = by_user.get(name, {})
+        today = local_today(friend_docs.get(name, {}).get("tzOffset", 0))
         friends.append({
             "username": name,
-            "streak": streak_from_records(day_records),
-            "completedToday": day_records.get(today, {}).get("fard", []),
+            "streak": streak_from_records(day_records, today),
+            "completedToday": day_records.get(today.isoformat(), {}).get("fard", []),
         })
     friends.sort(key=lambda f: f["streak"], reverse=True)
     return {"friends": friends}
