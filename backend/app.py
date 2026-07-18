@@ -15,8 +15,11 @@ from datetime import date, datetime, timedelta, timezone
 
 import bcrypt
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from pymongo import MongoClient, ReplaceOne
+
+SUPPORT_EMAIL = "timurharris23456@gmail.com"
 
 PRAYERS = ["fajr", "dhuhr", "asr", "maghrib", "isha"]
 
@@ -103,7 +106,78 @@ def streak_from_records(day_records: dict, today) -> int:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "version": "2-tz"}
+    return {"ok": True, "version": "3-support"}
+
+
+SUPPORT_PAGE = f"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SmartSalat — Support</title>
+<style>
+  :root {{ color-scheme: light dark; }}
+  * {{ box-sizing: border-box; }}
+  body {{
+    margin: 0; padding: 2.5rem 1.25rem;
+    font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    color: #1c1c1e; background: #f7f7f8;
+    display: flex; justify-content: center;
+  }}
+  .wrap {{ max-width: 640px; width: 100%; }}
+  h1 {{ font-size: 1.9rem; margin: 0 0 .25rem; }}
+  .sub {{ color: #6b6b70; margin: 0 0 2rem; }}
+  h2 {{ font-size: 1.15rem; margin: 2rem 0 .5rem; }}
+  a {{ color: #1c7c54; }}
+  .card {{
+    background: #fff; border: 1px solid #e5e5e7; border-radius: 14px;
+    padding: 1.1rem 1.25rem; margin: 1rem 0;
+  }}
+  .q {{ font-weight: 600; margin: 1rem 0 .2rem; }}
+  .q:first-child {{ margin-top: 0; }}
+  footer {{ color: #9a9a9f; font-size: .85rem; margin-top: 2.5rem; }}
+  @media (prefers-color-scheme: dark) {{
+    body {{ color: #ececf0; background: #0f0f10; }}
+    .sub {{ color: #9a9a9f; }}
+    .card {{ background: #1b1b1d; border-color: #2c2c2e; }}
+    a {{ color: #57d9a3; }}
+  }}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>SmartSalat Support</h1>
+    <p class="sub">Track your daily prayers, prayer times, Qibla, and streaks with friends.</p>
+
+    <div class="card">
+      <p style="margin:0 0 .4rem"><strong>Need help?</strong> Email us and we'll get back to you, usually within 2&ndash;3 days.</p>
+      <p style="margin:0"><a href="mailto:{SUPPORT_EMAIL}?subject=SmartSalat%20Support">{SUPPORT_EMAIL}</a></p>
+    </div>
+
+    <h2>Frequently asked questions</h2>
+    <div class="card">
+      <p class="q">How do I mark a prayer as prayed?</p>
+      <p style="margin:0">On the home screen, tap a prayer to mark it complete. Your streak counts any day you pray at least one fard prayer.</p>
+
+      <p class="q">Why don't my prayer times match another app?</p>
+      <p style="margin:0">Times are calculated from your device's location. Make sure location access is enabled in Settings so the app can pinpoint your area.</p>
+
+      <p class="q">How do I add a friend?</p>
+      <p style="margin:0">Open Settings to find your friend code, share it, and enter a friend's code to send them a request. They accept, and you'll see each other's streaks.</p>
+
+      <p class="q">Is my data private?</p>
+      <p style="margin:0">Yes. We collect only what's needed to sync your account and connect you with friends you choose. The full privacy policy is available inside the app.</p>
+    </div>
+
+    <footer>SmartSalat &middot; Contact: {SUPPORT_EMAIL}</footer>
+  </div>
+</body>
+</html>"""
+
+
+@app.get("/support", response_class=HTMLResponse)
+def support():
+    return SUPPORT_PAGE
 
 
 @app.post("/register", status_code=201)
