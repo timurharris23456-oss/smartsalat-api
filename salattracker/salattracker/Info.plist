@@ -4,6 +4,9 @@
 <dict>
 	<key>APIBaseURL</key>
 	<string>https://smartsalat-api.onrender.com</string>
+	<!-- App only uses standard HTTPS/TLS (exempt encryption); no custom crypto. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>

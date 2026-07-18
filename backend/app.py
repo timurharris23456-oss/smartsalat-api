@@ -11,15 +11,19 @@ Run:
 import os
 import random
 import secrets
+import time
+from collections import defaultdict, deque
 from datetime import date, datetime, timedelta, timezone
 
 import bcrypt
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from pymongo import MongoClient, ReplaceOne
 
 SUPPORT_EMAIL = "timurharris23456@gmail.com"
+OPERATOR_NAME = "Roya Qaemi"
+SESSION_TTL_DAYS = 180
 
 PRAYERS = ["fajr", "dhuhr", "asr", "maghrib", "isha"]
 
@@ -35,6 +39,8 @@ users.create_index(
     unique=True,
     partialFilterExpression={"friendCode": {"$type": "string"}},
 )
+# Bearer tokens expire so a leaked session can't be used forever.
+sessions.create_index("createdAt", expireAfterSeconds=SESSION_TTL_DAYS * 24 * 60 * 60)
 
 app = FastAPI(title="SmartSalat API")
 
@@ -64,6 +70,32 @@ class RespondBody(BaseModel):
 
 
 # ------------------------------------------------------------------ Helpers
+
+# In-memory sliding-window rate limiting. Per-process, which is fine for the
+# single free-tier instance; it fails open for clients we can't identify.
+_rate_buckets: dict[str, deque] = defaultdict(deque)
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def rate_limit(request: Request, name: str, max_hits: int, window_secs: int) -> None:
+    ip = _client_ip(request)
+    if ip == "unknown":
+        return
+    key = f"{name}:{ip}"
+    now = time.monotonic()
+    bucket = _rate_buckets[key]
+    while bucket and bucket[0] <= now - window_secs:
+        bucket.popleft()
+    if len(bucket) >= max_hits:
+        raise HTTPException(status_code=429, detail="Too many attempts — please wait a minute and try again.")
+    bucket.append(now)
+
 
 def current_user(authorization: str = Header(default="")) -> str:
     if not authorization.startswith("Bearer "):
@@ -106,47 +138,50 @@ def streak_from_records(day_records: dict, today) -> int:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "version": "3-support"}
+    return {"ok": True, "version": "4-account"}
 
 
-SUPPORT_PAGE = f"""<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SmartSalat — Support</title>
-<style>
-  :root {{ color-scheme: light dark; }}
-  * {{ box-sizing: border-box; }}
-  body {{
+# ------------------------------------------------------------- Public pages
+
+_PAGE_CSS = """
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body {
     margin: 0; padding: 2.5rem 1.25rem;
     font: 17px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     color: #1c1c1e; background: #f7f7f8;
     display: flex; justify-content: center;
-  }}
-  .wrap {{ max-width: 640px; width: 100%; }}
-  h1 {{ font-size: 1.9rem; margin: 0 0 .25rem; }}
-  .sub {{ color: #6b6b70; margin: 0 0 2rem; }}
-  h2 {{ font-size: 1.15rem; margin: 2rem 0 .5rem; }}
-  a {{ color: #1c7c54; }}
-  .card {{
-    background: #fff; border: 1px solid #e5e5e7; border-radius: 14px;
-    padding: 1.1rem 1.25rem; margin: 1rem 0;
-  }}
-  .q {{ font-weight: 600; margin: 1rem 0 .2rem; }}
-  .q:first-child {{ margin-top: 0; }}
-  footer {{ color: #9a9a9f; font-size: .85rem; margin-top: 2.5rem; }}
-  @media (prefers-color-scheme: dark) {{
-    body {{ color: #ececf0; background: #0f0f10; }}
-    .sub {{ color: #9a9a9f; }}
-    .card {{ background: #1b1b1d; border-color: #2c2c2e; }}
-    a {{ color: #57d9a3; }}
-  }}
-</style>
-</head>
-<body>
-  <div class="wrap">
-    <h1>SmartSalat Support</h1>
+  }
+  .wrap { max-width: 640px; width: 100%; }
+  h1 { font-size: 1.9rem; margin: 0 0 .25rem; }
+  .sub { color: #6b6b70; margin: 0 0 2rem; }
+  h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
+  a { color: #1c7c54; }
+  .card { background: #fff; border: 1px solid #e5e5e7; border-radius: 14px; padding: 1.1rem 1.25rem; margin: 1rem 0; }
+  .card ul { margin: 0; padding-left: 1.2rem; }
+  .card li { margin: .35rem 0; }
+  .q { font-weight: 600; margin: 1rem 0 .2rem; }
+  .q:first-child { margin-top: 0; }
+  footer { color: #9a9a9f; font-size: .85rem; margin-top: 2.5rem; }
+  @media (prefers-color-scheme: dark) {
+    body { color: #ececf0; background: #0f0f10; }
+    .sub { color: #9a9a9f; }
+    .card { background: #1b1b1d; border-color: #2c2c2e; }
+    a { color: #57d9a3; }
+  }
+"""
+
+
+def _html_page(title: str, body: str) -> str:
+    return (
+        '<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
+        '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
+        f"<title>{title}</title>\n<style>{_PAGE_CSS}</style>\n</head>\n"
+        f'<body>\n  <div class="wrap">\n{body}\n  </div>\n</body>\n</html>'
+    )
+
+
+SUPPORT_BODY = f"""    <h1>SmartSalat Support</h1>
     <p class="sub">Track your daily prayers, prayer times, Qibla, and streaks with friends.</p>
 
     <div class="card">
@@ -165,23 +200,101 @@ SUPPORT_PAGE = f"""<!doctype html>
       <p class="q">How do I add a friend?</p>
       <p style="margin:0">Open Settings to find your friend code, share it, and enter a friend's code to send them a request. They accept, and you'll see each other's streaks.</p>
 
+      <p class="q">How do I delete my account?</p>
+      <p style="margin:0">Open Settings and tap "Delete Account". This permanently removes your account, prayer history, and friends.</p>
+
       <p class="q">Is my data private?</p>
-      <p style="margin:0">Yes. We collect only what's needed to sync your account and connect you with friends you choose. The full privacy policy is available inside the app.</p>
+      <p style="margin:0">Yes. We collect only what's needed to sync your account and connect you with friends you choose. See our <a href="/privacy">Privacy Policy</a>.</p>
     </div>
 
-    <footer>SmartSalat &middot; Contact: {SUPPORT_EMAIL}</footer>
-  </div>
-</body>
-</html>"""
+    <footer>SmartSalat &middot; Contact: {SUPPORT_EMAIL}</footer>"""
 
 
 @app.get("/support", response_class=HTMLResponse)
 def support():
-    return SUPPORT_PAGE
+    return _html_page("SmartSalat — Support", SUPPORT_BODY)
+
+
+PRIVACY_EFFECTIVE = "July 11, 2026"
+
+PRIVACY_SECTIONS = [
+    ("Overview",
+     'SmartSalat ("the App", "we", "us") helps you track your daily prayers, view '
+     "prayer times, find the Qibla direction, and share prayer streaks with friends. "
+     "This Privacy Policy explains what information the App collects, how it is used, "
+     "and the choices you have. By creating an account or using the App, you agree to "
+     f"this policy. The App is operated by {OPERATOR_NAME}."),
+    ("Information You Provide",
+     "<ul><li><strong>Account details:</strong> a username and password you choose. Your "
+     "password is stored only as a secure cryptographic hash (bcrypt) — we never store or "
+     "see your actual password.</li>"
+     "<li><strong>Prayer activity:</strong> the prayers you mark as completed (Fard, Sunnah, "
+     "and Witr) and the streaks calculated from them.</li>"
+     "<li><strong>Friends:</strong> a friend code generated for your account, and the friend "
+     "connections and friend requests you create.</li></ul>"),
+    ("Information Collected Automatically",
+     "<ul><li><strong>Location:</strong> with your permission, the App uses your device's "
+     "location to calculate accurate prayer times and the Qibla direction. Your location is "
+     "used and stored only on your device — it is NOT sent to or stored on our servers. You "
+     "may instead choose a city manually, or decline location access.</li>"
+     "<li><strong>Notifications:</strong> if you allow them, prayer-time reminders are "
+     "scheduled locally on your device. No data is sent to us to deliver them.</li>"
+     "<li><strong>Session token:</strong> when you sign in, a session token is stored on your "
+     "device so you stay signed in.</li></ul>"),
+    ("How We Use Your Information",
+     "We use your information only to provide the App's features: to track your prayers and "
+     "streaks, sync your data across your devices through your account, calculate prayer times "
+     "and Qibla direction, send the prayer-time notifications you enable, and let your friends "
+     "see your streak. We do not use your information for advertising."),
+    ("How Your Information Is Shared",
+     "<ul><li><strong>With friends:</strong> people you connect with can see your username, "
+     "your current streak, and which prayers you have completed today.</li>"
+     "<li><strong>Service providers:</strong> your account and prayer data are stored using "
+     "MongoDB Atlas (database) and our server is hosted on Render. These providers process data "
+     "solely on our behalf to operate the App.</li>"
+     "<li>We do NOT sell your data, and the App contains no third-party advertising or analytics "
+     "trackers.</li>"
+     "<li>We may disclose information if required by law.</li></ul>"),
+    ("Data Storage & Security",
+     "Your account and prayer data are stored on our backend; other data (such as your saved "
+     "location and session token) is stored locally on your device. Passwords are hashed with "
+     "bcrypt, and data is transmitted over encrypted HTTPS connections. No method of storage or "
+     "transmission is 100% secure, but we take reasonable measures to protect your information."),
+    ("Your Choices & Data Deletion",
+     "<ul><li>You can turn location and notification permissions on or off at any time in iOS "
+     "Settings.</li>"
+     "<li>You can permanently delete your account and all associated data at any time from within "
+     'the App: open Settings and tap "Delete Account". This immediately removes your account, '
+     "prayer records, friend connections, and session from our servers.</li>"
+     f'<li>You may also request deletion by contacting us at <a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.</li></ul>'),
+    ("Children's Privacy",
+     "The App is not directed to children under 13, and we do not knowingly collect personal "
+     "information from children under 13. If you believe a child has provided us information, "
+     "please contact us and we will delete it."),
+    ("Changes to This Policy",
+     "We may update this Privacy Policy from time to time. Changes take effect when posted, and "
+     "material changes will require you to accept the updated policy before continuing to use the App."),
+    ("Contact",
+     "If you have any questions about this Privacy Policy or your data, contact us at "
+     f'<a href="mailto:{SUPPORT_EMAIL}">{SUPPORT_EMAIL}</a>.'),
+]
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+def privacy():
+    parts = [
+        "    <h1>Privacy Policy</h1>",
+        f'    <p class="sub">SmartSalat &middot; Effective {PRIVACY_EFFECTIVE}</p>',
+    ]
+    for title, html in PRIVACY_SECTIONS:
+        parts.append(f'    <h2>{title}</h2>\n    <div class="card">{html}</div>')
+    parts.append(f"    <footer>Operated by {OPERATOR_NAME} &middot; {SUPPORT_EMAIL}</footer>")
+    return _html_page("SmartSalat — Privacy Policy", "\n".join(parts))
 
 
 @app.post("/register", status_code=201)
-def register(creds: Credentials):
+def register(creds: Credentials, request: Request):
+    rate_limit(request, "register", max_hits=5, window_secs=300)
     username = creds.username.strip().lower()
     if len(username) < 3:
         raise HTTPException(status_code=400, detail="Username must be at least 3 characters")
@@ -202,7 +315,8 @@ def register(creds: Credentials):
 
 
 @app.post("/login")
-def login(creds: Credentials):
+def login(creds: Credentials, request: Request):
+    rate_limit(request, "login", max_hits=10, window_secs=60)
     username = creds.username.strip().lower()
     user = users.find_one({"_id": username})
     if not user or not bcrypt.checkpw(creds.password.encode(), user["passwordHash"]):
@@ -234,6 +348,20 @@ def logout(authorization: str = Header(default="")):
 def me(username: str = Depends(current_user)):
     user = users.find_one({"_id": username}) or {}
     return {"username": username, "friendCode": user.get("friendCode", "")}
+
+
+@app.delete("/account", status_code=204)
+def delete_account(username: str = Depends(current_user)):
+    """Permanently delete the account and everything tied to it."""
+    records_col.delete_many({"userId": username})
+    sessions.delete_many({"username": username})
+    # Remove this user from everyone else's friends lists and pending requests.
+    users.update_many(
+        {"$or": [{"friends": username}, {"incomingRequests": username}]},
+        {"$pull": {"friends": username, "incomingRequests": username}},
+    )
+    users.delete_one({"_id": username})
+    return None
 
 
 # ------------------------------------------------------------------ Records

@@ -76,6 +76,11 @@ struct APIClient {
         _ = try? await send("/logout", method: "POST", body: nil, token: token)
     }
 
+    /// Permanently delete the signed-in account and all its data on the server.
+    func deleteAccount(token: String) async throws {
+        _ = try await send("/account", method: "DELETE", body: nil, token: token)
+    }
+
     // MARK: - Records
 
     func fetchRecords(token: String) async throws -> [String: RemoteDay] {

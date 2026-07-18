@@ -2,10 +2,9 @@
 //  PrivacyPolicy.swift
 //  salattracker
 //
-//  The in-app privacy policy content. This is a good-faith, accurate draft
-//  based on what the app actually does — review and fill the [bracketed]
-//  placeholders (developer name, contact email) before publishing, and keep
-//  the hosted copy (App Store Connect requires a public policy URL) in sync.
+//  The in-app privacy policy content. Keep the hosted copy (served at
+//  /privacy by the backend, which App Store Connect requires as a public URL)
+//  in sync with any edits here.
 //
 
 import Foundation
@@ -23,7 +22,7 @@ enum PrivacyPolicy {
          with friends. This Privacy Policy explains what information the App \
          collects, how it is used, and the choices you have. By creating an \
          account or using the App, you agree to this policy. The App is operated \
-         by [Your Name / Company].
+         by Roya Qaemi.
          """),
 
         ("Information You Provide",
@@ -84,9 +83,12 @@ enum PrivacyPolicy {
          """
          • You can turn location and notification permissions on or off at any \
          time in iOS Settings.
-         • You may request deletion of your account and all associated data by \
-         contacting us at [your contact email]. We will delete your data within a \
-         reasonable period.
+         • You can permanently delete your account and all associated data at any \
+         time from within the App: open Settings and tap "Delete Account". This \
+         immediately removes your account, prayer records, friend connections, and \
+         session from our servers.
+         • You may also request deletion by contacting us at \
+         timurharris23456@gmail.com.
          """),
 
         ("Children's Privacy",
@@ -106,7 +108,7 @@ enum PrivacyPolicy {
         ("Contact",
          """
          If you have any questions about this Privacy Policy or your data, contact \
-         us at [your contact email].
+         us at timurharris23456@gmail.com.
          """),
     ]
 }

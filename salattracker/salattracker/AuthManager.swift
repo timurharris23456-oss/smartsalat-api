@@ -99,6 +99,20 @@ final class AuthManager: ObservableObject {
         if let token {
             Task { await api.logout(token: token) }
         }
+        clearSession()
+    }
+
+    /// Permanently delete the account and all its data on the server, then
+    /// return to the signed-out state. Leaves the session intact on failure.
+    func deleteAccount() async {
+        guard let token else { return }
+        await perform {
+            try await api.deleteAccount(token: token)
+            clearSession()
+        }
+    }
+
+    private func clearSession() {
         token = nil
         username = nil
         UserDefaults.standard.removeObject(forKey: Keys.token)

@@ -13,6 +13,7 @@ struct SettingsView: View {
     @State private var isSearching = false
     @State private var searchFailed = false
     @State private var showPrivacy = false
+    @State private var showDeleteConfirm = false
 
     private let methods: [(key: String, label: String)] = [
         ("northAmerica", "ISNA (North America)"),
@@ -121,8 +122,20 @@ struct SettingsView: View {
                 } label: {
                     Text("Sign Out")
                 }
+                Button(role: .destructive) {
+                    showDeleteConfirm = true
+                } label: {
+                    if auth.isWorking {
+                        ProgressView()
+                    } else {
+                        Text("Delete Account")
+                    }
+                }
+                .disabled(auth.isWorking)
             } header: {
                 Text("Account")
+            } footer: {
+                Text("Deleting your account permanently removes your prayer history, streaks, and friends. This can't be undone.")
             }
 
             Section {
@@ -149,6 +162,14 @@ struct SettingsView: View {
                     .navigationTitle("Privacy Policy")
                     .navigationBarTitleDisplayMode(.inline)
             }
+        }
+        .confirmationDialog("Delete your account?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
+            Button("Delete Account", role: .destructive) {
+                Task { await auth.deleteAccount() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This permanently deletes your account and all your data on our servers. This can't be undone.")
         }
     }
 
