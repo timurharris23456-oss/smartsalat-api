@@ -163,13 +163,8 @@ struct SettingsView: View {
                     .navigationBarTitleDisplayMode(.inline)
             }
         }
-        .confirmationDialog("Delete your account?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-            Button("Delete Account", role: .destructive) {
-                Task { await auth.deleteAccount() }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("This permanently deletes your account and all your data on our servers. This can't be undone.")
+        .sheet(isPresented: $showDeleteConfirm) {
+            DeleteAccountSheet(auth: auth)
         }
     }
 
@@ -203,5 +198,85 @@ struct SettingsView: View {
             longitude: coordinate.longitude,
             timeZoneID: item.timeZone?.identifier ?? TimeZone.current.identifier
         )
+    }
+}
+
+/// Account-deletion confirmation. The user must type "DELETE" before the
+/// destructive action is enabled, guarding against accidental deletion.
+private struct DeleteAccountSheet: View {
+    @ObservedObject var auth: AuthManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var confirmation = ""
+
+    /// The exact word the user must type to enable deletion.
+    private let phrase = "DELETE"
+    private var canDelete: Bool {
+        confirmation.trimmingCharacters(in: .whitespaces) == phrase
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Label("This can't be undone", systemImage: "exclamationmark.triangle.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.red)
+                        Text("Deleting your account permanently removes your prayer history, streaks, and friends from our servers.")
+                            .font(.subheadline)
+                            .foregroundStyle(Theme.text.opacity(0.85))
+                    }
+                    .padding(.vertical, 4)
+                }
+
+                Section {
+                    TextField(phrase, text: $confirmation)
+                        .textInputAutocapitalization(.characters)
+                        .autocorrectionDisabled()
+                        .submitLabel(.done)
+                } header: {
+                    Text("Type \(phrase) to confirm")
+                }
+
+                if let error = auth.errorMessage {
+                    Section {
+                        Text(error)
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                }
+
+                Section {
+                    Button(role: .destructive) {
+                        Task {
+                            await auth.deleteAccount()
+                            // On success the user is signed out and this screen is
+                            // torn down anyway; if we're still signed in the delete
+                            // failed, so keep the sheet open to show the error.
+                            if !auth.isSignedIn { dismiss() }
+                        }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if auth.isWorking {
+                                ProgressView()
+                            } else {
+                                Text("Delete My Account")
+                            }
+                            Spacer()
+                        }
+                    }
+                    .disabled(!canDelete || auth.isWorking)
+                }
+            }
+            .navigationTitle("Delete Account")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                        .disabled(auth.isWorking)
+                }
+            }
+        }
     }
 }
