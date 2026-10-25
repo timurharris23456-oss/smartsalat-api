@@ -49,7 +49,8 @@ struct SalatStreaksView: View {
                     } else {
                         StreakRow(rank: index + 1, entry: entry,
                                   onReport: { reportTarget = entry.name },
-                                  onRemove: { removeTarget = entry.name })
+                                  onRemove: { removeTarget = entry.name },
+                                  onNudge: { prayer in nudge(entry.name, prayer) })
                     }
                 }
             }
@@ -96,6 +97,17 @@ struct SalatStreaksView: View {
     private func remove(_ name: String) {
         Task {
             try? await auth.removeFriend(name)
+            await load()
+        }
+    }
+
+    private func nudge(_ name: String, _ prayer: Prayer) {
+        // Optimistically mark it nudged so the button updates right away.
+        if let i = friends.firstIndex(where: { $0.name == name }) {
+            friends[i].nudgedToday.insert(prayer)
+        }
+        Task {
+            try? await auth.nudge(username: name, prayer: prayer.rawValue)
             await load()
         }
     }
@@ -230,6 +242,7 @@ private struct StreakRow: View {
     let entry: StreakEntry
     var onReport: (() -> Void)? = nil
     var onRemove: (() -> Void)? = nil
+    var onNudge: ((Prayer) -> Void)? = nil
 
     var body: some View {
         if onReport != nil || onRemove != nil {
@@ -248,6 +261,31 @@ private struct StreakRow: View {
         if let onRemove {
             Button(role: .destructive, action: onRemove) {
                 Label("Remove Friend", systemImage: "person.badge.minus")
+            }
+        }
+    }
+
+    @ViewBuilder private var nudgeControl: some View {
+        if !entry.isYou, !entry.missedToday.isEmpty {
+            if let prayer = entry.nudgeablePrayer {
+                Button {
+                    onNudge?(prayer)
+                } label: {
+                    Text("Nudge")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .frame(height: 30)
+                        .background(Theme.accent, in: Capsule())
+                }
+                .buttonStyle(.plain)
+            } else {
+                Text("Nudged")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(Theme.subtle)
+                    .padding(.horizontal, 10)
+                    .frame(height: 30)
+                    .background(Theme.subtle.opacity(0.12), in: Capsule())
             }
         }
     }
@@ -279,6 +317,8 @@ private struct StreakRow: View {
             }
 
             Spacer()
+
+            nudgeControl
 
             HStack(spacing: 3) {
                 Text("🔥")

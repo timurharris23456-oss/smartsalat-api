@@ -6,9 +6,38 @@
 //
 
 import SwiftUI
+import UIKit
+
+/// Holds the latest APNs device token and hands it to whoever is listening
+/// (AuthManager), bridging the UIKit app-delegate callback into the app.
+@MainActor
+final class PushRegistrar {
+    static let shared = PushRegistrar()
+    private(set) var token: String?
+    var onToken: ((String) -> Void)?
+
+    func deliver(_ token: String) {
+        self.token = token
+        onToken?(token)
+    }
+}
+
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(_ application: UIApplication,
+                     didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+        let hex = deviceToken.map { String(format: "%02x", $0) }.joined()
+        Task { @MainActor in PushRegistrar.shared.deliver(hex) }
+    }
+
+    func application(_ application: UIApplication,
+                     didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        // Push isn't available yet (e.g. the capability isn't enabled) — ignore.
+    }
+}
 
 @main
 struct salattrackerApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var store: PrayerStore
     @StateObject private var auth: AuthManager
 

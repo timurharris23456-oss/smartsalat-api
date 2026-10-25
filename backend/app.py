@@ -16,16 +16,20 @@ from collections import defaultdict, deque
 from datetime import date, datetime, timedelta, timezone
 
 import bcrypt
+import httpx
+import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from pymongo import MongoClient, ReplaceOne
+from pymongo.errors import DuplicateKeyError
 
 SUPPORT_EMAIL = "timurharris23456@gmail.com"
 OPERATOR_NAME = "Roya Qaemi"
 SESSION_TTL_DAYS = 180
 
 PRAYERS = ["fajr", "dhuhr", "asr", "maghrib", "isha"]
+PRAYER_NAMES = {p: p.capitalize() for p in PRAYERS}
 
 client = MongoClient(os.environ["MONGODB_URI"])
 db = client[os.environ.get("MONGODB_DB", "smartsalat")]
@@ -33,6 +37,7 @@ users = db["users"]
 sessions = db["sessions"]
 records_col = db["prayer_records"]
 reports_col = db["reports"]
+nudges_col = db["nudges"]
 
 # Friend codes must be unique among users that have one.
 users.create_index(
@@ -42,6 +47,69 @@ users.create_index(
 )
 # Bearer tokens expire so a leaked session can't be used forever.
 sessions.create_index("createdAt", expireAfterSeconds=SESSION_TTL_DAYS * 24 * 60 * 60)
+# Nudges are only needed for same-day de-duplication; expire them after 2 days.
+nudges_col.create_index("createdAt", expireAfterSeconds=2 * 24 * 60 * 60)
+
+
+# -------------------------------------------------------- Push notifications
+
+APNS_KEY = os.environ.get("APNS_KEY", "").replace("\\n", "\n")
+APNS_KEY_ID = os.environ.get("APNS_KEY_ID", "")
+APNS_TEAM_ID = os.environ.get("APNS_TEAM_ID", "")
+APNS_BUNDLE_ID = os.environ.get("APNS_BUNDLE_ID", "timurmirabi.salattracker")
+APNS_HOST = os.environ.get("APNS_HOST", "https://api.push.apple.com")
+
+_apns_jwt_cache: dict = {"token": None, "iat": 0.0}
+
+
+def apns_configured() -> bool:
+    return bool(APNS_KEY and APNS_KEY_ID and APNS_TEAM_ID)
+
+
+def _apns_auth_token() -> str:
+    """A cached ES256 JWT for APNs token-based auth (valid < 1h)."""
+    now = time.time()
+    if _apns_jwt_cache["token"] and now - _apns_jwt_cache["iat"] < 3000:
+        return _apns_jwt_cache["token"]
+    token = jwt.encode(
+        {"iss": APNS_TEAM_ID, "iat": int(now)},
+        APNS_KEY,
+        algorithm="ES256",
+        headers={"kid": APNS_KEY_ID},
+    )
+    _apns_jwt_cache.update(token=token, iat=now)
+    return token
+
+
+def send_push(tokens: list[str], title: str, body: str) -> int:
+    """Send an alert to each device token. Returns how many were delivered, and
+    prunes tokens APNs reports as dead. No-op until APNs env vars are set."""
+    if not apns_configured() or not tokens:
+        return 0
+    payload = {"aps": {"alert": {"title": title, "body": body}, "sound": "default"}}
+    headers = {
+        "authorization": f"bearer {_apns_auth_token()}",
+        "apns-topic": APNS_BUNDLE_ID,
+        "apns-push-type": "alert",
+    }
+    delivered = 0
+    dead: list[str] = []
+    try:
+        with httpx.Client(http2=True, timeout=10) as http:
+            for tok in tokens:
+                try:
+                    r = http.post(f"{APNS_HOST}/3/device/{tok}", json=payload, headers=headers)
+                    if r.status_code == 200:
+                        delivered += 1
+                    elif r.status_code in (400, 410):
+                        dead.append(tok)  # BadDeviceToken / Unregistered
+                except Exception:
+                    pass
+    except Exception:
+        return delivered
+    if dead:
+        users.update_many({}, {"$pull": {"deviceTokens": {"$in": dead}}})
+    return delivered
 
 app = FastAPI(title="SmartSalat API")
 
@@ -77,6 +145,15 @@ class AvatarBody(BaseModel):
 class ReportBody(BaseModel):
     username: str
     reason: str = ""
+
+
+class DeviceTokenBody(BaseModel):
+    token: str
+
+
+class NudgeBody(BaseModel):
+    username: str
+    prayer: str
 
 
 # Reject oversized avatars (base64 chars). ~256px JPEG is well under this.
@@ -152,7 +229,7 @@ def streak_from_records(day_records: dict, today) -> int:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "version": "7-report"}
+    return {"ok": True, "version": "8-nudge"}
 
 
 # ------------------------------------------------------------- Public pages
@@ -508,6 +585,61 @@ def report_user(body: ReportBody, username: str = Depends(current_user)):
     return {"reported": reported}
 
 
+# ----------------------------------------------------------- Push & nudges
+
+@app.post("/device-token")
+def register_device_token(body: DeviceTokenBody, username: str = Depends(current_user)):
+    """Store the caller's APNs device token so they can receive push nudges."""
+    token = body.token.strip()
+    if token:
+        users.update_one({"_id": username}, {"$addToSet": {"deviceTokens": token}})
+    return {"ok": True}
+
+
+@app.post("/nudge")
+def nudge(body: NudgeBody, username: str = Depends(current_user)):
+    """Nudge a friend who hasn't prayed a given prayer today. Limited to one
+    nudge per friend per prayer per day; sends them a push notification."""
+    prayer = body.prayer.strip().lower()
+    if prayer not in PRAYERS:
+        raise HTTPException(status_code=400, detail="Unknown prayer")
+
+    target = body.username.strip().lower()
+    me = users.find_one({"_id": username}) or {}
+    if target not in me.get("friends", []):
+        raise HTTPException(status_code=403, detail="You can only nudge your friends")
+
+    target_doc = users.find_one({"_id": target})
+    if not target_doc:
+        raise HTTPException(status_code=404, detail="No such user")
+
+    # "Today" and "missed" are evaluated in the friend's own timezone.
+    today = local_today(target_doc.get("tzOffset", 0)).isoformat()
+    record = records_col.find_one({"_id": f"{target}:{today}"}) or {}
+    if prayer in record.get("fard", []):
+        raise HTTPException(status_code=400, detail="They've already prayed that one")
+
+    # One nudge per (nudger, target, prayer, day) — enforced atomically by _id.
+    try:
+        nudges_col.insert_one({
+            "_id": f"{username}:{target}:{prayer}:{today}",
+            "nudger": username,
+            "target": target,
+            "prayer": prayer,
+            "date": today,
+            "createdAt": datetime.now(timezone.utc),
+        })
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail="You've already nudged them for this prayer today")
+
+    delivered = send_push(
+        target_doc.get("deviceTokens", []),
+        "SmartSalat",
+        f"{username.capitalize()} nudged you to pray {PRAYER_NAMES[prayer]}.",
+    )
+    return {"nudged": target, "prayer": prayer, "delivered": delivered}
+
+
 @app.get("/friends")
 def list_friends(username: str = Depends(current_user)):
     user = users.find_one({"_id": username}) or {}
@@ -522,6 +654,11 @@ def list_friends(username: str = Depends(current_user)):
     # Each friend's "today" is computed in their own timezone.
     friend_docs = {u["_id"]: u for u in users.find({"_id": {"$in": friend_names}})}
 
+    # Which prayers the caller has already nudged each friend for (by date).
+    nudged: dict[str, dict[str, list]] = {}
+    for n in nudges_col.find({"nudger": username, "target": {"$in": friend_names}}):
+        nudged.setdefault(n["target"], {}).setdefault(n["date"], []).append(n["prayer"])
+
     friends = []
     for name in friend_names:
         day_records = by_user.get(name, {})
@@ -531,6 +668,7 @@ def list_friends(username: str = Depends(current_user)):
             "streak": streak_from_records(day_records, today),
             "completedToday": day_records.get(today.isoformat(), {}).get("fard", []),
             "avatar": friend_docs.get(name, {}).get("avatar"),
+            "nudgedToday": nudged.get(name, {}).get(today.isoformat(), []),
         })
     friends.sort(key=lambda f: f["streak"], reverse=True)
     return {"friends": friends}

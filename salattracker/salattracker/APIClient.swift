@@ -36,6 +36,7 @@ struct APIClient {
         let streak: Int
         let completedToday: [String]
         let avatar: String?
+        let nudgedToday: [String]?
     }
 
     /// A day's record as the server represents it.
@@ -135,6 +136,20 @@ struct APIClient {
     func reportFriend(username: String, reason: String, token: String) async throws {
         _ = try await send("/friends/report", method: "POST",
                            body: ["username": username, "reason": reason], token: token)
+    }
+
+    // MARK: - Push & nudges
+
+    func registerDeviceToken(_ deviceToken: String, token: String) async throws {
+        _ = try await send("/device-token", method: "POST",
+                           body: ["token": deviceToken], token: token)
+    }
+
+    /// Nudge a friend to pray a specific prayer. Throws on the server's limits
+    /// (e.g. already nudged today, or they've already prayed it).
+    func nudge(username: String, prayer: String, token: String) async throws {
+        _ = try await send("/nudge", method: "POST",
+                           body: ["username": username, "prayer": prayer], token: token)
     }
 
     // MARK: - Profile picture

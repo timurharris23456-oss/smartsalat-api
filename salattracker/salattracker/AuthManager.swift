@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import UIKit
 
 @MainActor
 final class AuthManager: ObservableObject {
@@ -31,9 +32,15 @@ final class AuthManager: ObservableObject {
         self.store = store
         token = UserDefaults.standard.string(forKey: Keys.token)
         username = UserDefaults.standard.string(forKey: Keys.username)
+        PushRegistrar.shared.onToken = { [weak self] deviceToken in
+            Task { await self?.sendDeviceToken(deviceToken) }
+        }
         if let token, let username {
             store.startSession(username: username, token: token)
-            Task { await refreshMe() }
+            Task {
+                await refreshMe()
+                await registerForPushNotifications()
+            }
         }
     }
 
@@ -69,7 +76,8 @@ final class AuthManager: ObservableObject {
             name: f.username,
             streak: f.streak,
             completedToday: Set(f.completedToday.compactMap(Prayer.init(rawValue:))),
-            avatar: f.avatar.flatMap { Data(base64Encoded: $0) }
+            avatar: f.avatar.flatMap { Data(base64Encoded: $0) },
+            nudgedToday: Set((f.nudgedToday ?? []).compactMap(Prayer.init(rawValue:)))
         )
     }
 
@@ -102,6 +110,27 @@ final class AuthManager: ObservableObject {
     func reportFriend(_ username: String, reason: String = "") async throws {
         guard let token else { return }
         try await api.reportFriend(username: username, reason: reason, token: token)
+    }
+
+    /// Nudge a friend to pray a specific prayer (sends them a push notification).
+    func nudge(username: String, prayer: String) async throws {
+        guard let token else { return }
+        try await api.nudge(username: username, prayer: prayer, token: token)
+    }
+
+    // MARK: - Push notifications
+
+    /// Ask for notification permission and register for remote (push) delivery.
+    func registerForPushNotifications() async {
+        let granted = await NotificationScheduler.shared.requestPermission()
+        if granted {
+            UIApplication.shared.registerForRemoteNotifications()
+        }
+    }
+
+    private func sendDeviceToken(_ deviceToken: String) async {
+        guard let token else { return }
+        try? await api.registerDeviceToken(deviceToken, token: token)
     }
 
     func register(username: String, password: String, avatar: Data? = nil) async {
@@ -178,6 +207,12 @@ final class AuthManager: ObservableObject {
         UserDefaults.standard.set(auth.token, forKey: Keys.token)
         UserDefaults.standard.set(auth.username, forKey: Keys.username)
         store.startSession(username: auth.username, token: auth.token)
+        Task {
+            await registerForPushNotifications()
+            if let deviceToken = PushRegistrar.shared.token {
+                await sendDeviceToken(deviceToken)
+            }
+        }
     }
 
     private func perform(_ action: () async throws -> Void) async {
