@@ -99,6 +99,11 @@ final class AuthManager: ObservableObject {
         try await api.removeFriend(username: username, token: token)
     }
 
+    func reportFriend(_ username: String, reason: String = "") async throws {
+        guard let token else { return }
+        try await api.reportFriend(username: username, reason: reason, token: token)
+    }
+
     func register(username: String, password: String, avatar: Data? = nil) async {
         await perform {
             try await api.register(username: username, password: password)

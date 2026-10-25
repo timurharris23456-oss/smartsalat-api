@@ -32,6 +32,7 @@ db = client[os.environ.get("MONGODB_DB", "smartsalat")]
 users = db["users"]
 sessions = db["sessions"]
 records_col = db["prayer_records"]
+reports_col = db["reports"]
 
 # Friend codes must be unique among users that have one.
 users.create_index(
@@ -71,6 +72,11 @@ class RespondBody(BaseModel):
 
 class AvatarBody(BaseModel):
     avatar: str   # a base64-encoded JPEG (small, square); the app resizes before upload
+
+
+class ReportBody(BaseModel):
+    username: str
+    reason: str = ""
 
 
 # Reject oversized avatars (base64 chars). ~256px JPEG is well under this.
@@ -146,7 +152,7 @@ def streak_from_records(day_records: dict, today) -> int:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "version": "6-avatar"}
+    return {"ok": True, "version": "7-report"}
 
 
 # ------------------------------------------------------------- Public pages
@@ -486,6 +492,20 @@ def remove_friend(body: RespondBody, username: str = Depends(current_user)):
     users.update_one({"_id": username}, {"$pull": {"friends": friend}})
     users.update_one({"_id": friend}, {"$pull": {"friends": username}})
     return {"removed": friend}
+
+
+@app.post("/friends/report")
+def report_user(body: ReportBody, username: str = Depends(current_user)):
+    """Record a report about another user's content (e.g. an objectionable
+    profile photo) for the developer to review."""
+    reported = body.username.strip().lower()
+    reports_col.insert_one({
+        "reporter": username,
+        "reported": reported,
+        "reason": body.reason[:500],
+        "createdAt": datetime.now(timezone.utc),
+    })
+    return {"reported": reported}
 
 
 @app.get("/friends")

@@ -13,6 +13,8 @@ struct SalatStreaksView: View {
     @State private var requests: [String] = []
     @State private var showAddFriend = false
     @State private var loadState: LoadState = .loading
+    @State private var reportTarget: String?
+    @State private var removeTarget: String?
 
     private enum LoadState { case loading, loaded, failed }
 
@@ -42,7 +44,13 @@ struct SalatStreaksView: View {
                 }
 
                 ForEach(Array(ranked.enumerated()), id: \.element.id) { index, entry in
-                    StreakRow(rank: index + 1, entry: entry)
+                    if entry.isYou {
+                        StreakRow(rank: index + 1, entry: entry)
+                    } else {
+                        StreakRow(rank: index + 1, entry: entry,
+                                  onReport: { reportTarget = entry.name },
+                                  onRemove: { removeTarget = entry.name })
+                    }
                 }
             }
             .padding()
@@ -52,6 +60,43 @@ struct SalatStreaksView: View {
         .refreshable { await load() }
         .sheet(isPresented: $showAddFriend) {
             AddFriendSheet(onChanged: { Task { await load() } })
+        }
+        .confirmationDialog(
+            "Report this profile photo?",
+            isPresented: Binding(get: { reportTarget != nil },
+                                 set: { if !$0 { reportTarget = nil } }),
+            titleVisibility: .visible, presenting: reportTarget
+        ) { name in
+            Button("Report & Remove", role: .destructive) { report(name) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("We'll review this photo and remove this person from your friends. You can add them again later.")
+        }
+        .confirmationDialog(
+            "Remove this friend?",
+            isPresented: Binding(get: { removeTarget != nil },
+                                 set: { if !$0 { removeTarget = nil } }),
+            titleVisibility: .visible, presenting: removeTarget
+        ) { name in
+            Button("Remove \(name)", role: .destructive) { remove(name) }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("You'll both be removed from each other's friends list.")
+        }
+    }
+
+    private func report(_ name: String) {
+        Task {
+            try? await auth.reportFriend(name, reason: "Reported from leaderboard")
+            try? await auth.removeFriend(name)
+            await load()
+        }
+    }
+
+    private func remove(_ name: String) {
+        Task {
+            try? await auth.removeFriend(name)
+            await load()
         }
     }
 
@@ -183,8 +228,31 @@ struct SalatStreaksView: View {
 private struct StreakRow: View {
     let rank: Int
     let entry: StreakEntry
+    var onReport: (() -> Void)? = nil
+    var onRemove: (() -> Void)? = nil
 
     var body: some View {
+        if onReport != nil || onRemove != nil {
+            rowContent.contextMenu { menu }
+        } else {
+            rowContent
+        }
+    }
+
+    @ViewBuilder private var menu: some View {
+        if let onReport {
+            Button(role: .destructive, action: onReport) {
+                Label("Report Photo", systemImage: "flag")
+            }
+        }
+        if let onRemove {
+            Button(role: .destructive, action: onRemove) {
+                Label("Remove Friend", systemImage: "person.badge.minus")
+            }
+        }
+    }
+
+    private var rowContent: some View {
         HStack(spacing: 12) {
             Text("\(rank)")
                 .font(.subheadline.weight(.bold).monospacedDigit())

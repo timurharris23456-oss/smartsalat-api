@@ -131,6 +131,12 @@ struct APIClient {
         _ = try await send("/friends/remove", method: "POST", body: ["username": username], token: token)
     }
 
+    /// Report another user's content (e.g. an objectionable profile photo).
+    func reportFriend(username: String, reason: String, token: String) async throws {
+        _ = try await send("/friends/report", method: "POST",
+                           body: ["username": username, "reason": reason], token: token)
+    }
+
     // MARK: - Profile picture
 
     /// Upload a profile picture (a small JPEG, base64-encoded for transport).
