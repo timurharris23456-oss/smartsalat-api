@@ -28,12 +28,14 @@ struct APIClient {
     struct MeResponse: Codable {
         let username: String
         let friendCode: String
+        let avatar: String?
     }
 
     struct RemoteFriend: Codable {
         let username: String
         let streak: Int
         let completedToday: [String]
+        let avatar: String?
     }
 
     /// A day's record as the server represents it.
@@ -127,6 +129,18 @@ struct APIClient {
 
     func removeFriend(username: String, token: String) async throws {
         _ = try await send("/friends/remove", method: "POST", body: ["username": username], token: token)
+    }
+
+    // MARK: - Profile picture
+
+    /// Upload a profile picture (a small JPEG, base64-encoded for transport).
+    func setAvatar(jpeg: Data, token: String) async throws {
+        _ = try await send("/avatar", method: "PUT",
+                           body: ["avatar": jpeg.base64EncodedString()], token: token)
+    }
+
+    func removeAvatar(token: String) async throws {
+        _ = try await send("/avatar", method: "DELETE", body: nil, token: token)
     }
 
     // MARK: - Transport

@@ -16,6 +16,7 @@ struct StreakEntry: Identifiable {
     let streak: Int
     let completedToday: Set<Prayer>
     var isYou: Bool = false
+    var avatar: Data? = nil
 
     var completedCount: Int { completedToday.count }
     var isComplete: Bool { completedToday.count == Prayer.allCases.count }

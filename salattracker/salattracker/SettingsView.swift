@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import PhotosUI
 
 struct SettingsView: View {
     @EnvironmentObject private var auth: AuthManager
@@ -14,6 +15,12 @@ struct SettingsView: View {
     @State private var searchFailed = false
     @State private var showPrivacy = false
     @State private var showDeleteConfirm = false
+    @State private var avatarItem: PhotosPickerItem?
+
+    private var avatarInitials: String {
+        let letters = (auth.username ?? "").split(separator: " ").prefix(2).compactMap(\.first)
+        return String(letters).uppercased()
+    }
 
     private let methods: [(key: String, label: String)] = [
         ("northAmerica", "ISNA (North America)"),
@@ -114,6 +121,33 @@ struct SettingsView: View {
             }
 
             Section {
+                HStack(spacing: 16) {
+                    AvatarView(initials: avatarInitials, imageData: auth.avatarData, size: 60)
+                    VStack(alignment: .leading, spacing: 6) {
+                        PhotosPicker(selection: $avatarItem, matching: .images) {
+                            Text(auth.avatarData == nil ? "Add Photo" : "Change Photo")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(Theme.primary)
+                        }
+                        if auth.avatarData != nil {
+                            Button(role: .destructive) {
+                                Task { await auth.removeAvatar() }
+                            } label: {
+                                Text("Remove Photo").font(.subheadline)
+                            }
+                        }
+                    }
+                    Spacer()
+                    if auth.isWorking {
+                        ProgressView()
+                    }
+                }
+                .padding(.vertical, 4)
+            } header: {
+                Text("Profile Photo")
+            }
+
+            Section {
                 if let username = auth.username {
                     LabeledContent("Signed in as", value: username)
                 }
@@ -156,6 +190,14 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .onChange(of: avatarItem) { _, item in
+            Task {
+                if let item, let raw = try? await item.loadTransferable(type: Data.self),
+                   let jpeg = ProfileImage.jpeg(from: raw) {
+                    await auth.setAvatar(jpeg)
+                }
+            }
+        }
         .sheet(isPresented: $showPrivacy) {
             NavigationStack {
                 PrivacyPolicyView()

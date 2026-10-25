@@ -4,14 +4,22 @@
 //
 
 import SwiftUI
+import PhotosUI
 
 struct LoginView: View {
     @EnvironmentObject private var auth: AuthManager
     @State private var username = ""
     @State private var password = ""
     @State private var isRegistering = false
+    @State private var avatarItem: PhotosPickerItem?
+    @State private var avatarData: Data?
 
     private var canSubmit: Bool { username.count >= 3 && password.count >= 6 }
+
+    private var avatarInitials: String {
+        let letters = username.split(separator: " ").prefix(2).compactMap(\.first)
+        return String(letters).uppercased()
+    }
 
     var body: some View {
         ZStack {
@@ -28,6 +36,10 @@ struct LoginView: View {
                     Text(isRegistering ? "Create your account" : "Welcome back")
                         .font(.subheadline)
                         .foregroundStyle(Theme.subtle)
+                }
+
+                if isRegistering {
+                    avatarPicker
                 }
 
                 VStack(spacing: 12) {
@@ -73,10 +85,37 @@ struct LoginView: View {
         }
     }
 
+    private var avatarPicker: some View {
+        VStack(spacing: 6) {
+            PhotosPicker(selection: $avatarItem, matching: .images) {
+                ZStack(alignment: .bottomTrailing) {
+                    AvatarView(initials: avatarInitials, imageData: avatarData, size: 92)
+                        .overlay(Circle().strokeBorder(Theme.primary.opacity(0.25), lineWidth: 1))
+                    Image(systemName: "camera.fill")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(8)
+                        .background(Theme.primary, in: Circle())
+                        .overlay(Circle().strokeBorder(Theme.background, lineWidth: 2))
+                }
+            }
+            Text("Add a profile photo (optional)")
+                .font(.caption)
+                .foregroundStyle(Theme.subtle)
+        }
+        .onChange(of: avatarItem) { _, item in
+            Task {
+                if let item, let raw = try? await item.loadTransferable(type: Data.self) {
+                    avatarData = ProfileImage.jpeg(from: raw)
+                }
+            }
+        }
+    }
+
     private func submit() {
         Task {
             if isRegistering {
-                await auth.register(username: username, password: password)
+                await auth.register(username: username, password: password, avatar: avatarData)
             } else {
                 await auth.signIn(username: username, password: password)
             }

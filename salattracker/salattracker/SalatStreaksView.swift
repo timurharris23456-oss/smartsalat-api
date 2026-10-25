@@ -16,7 +16,8 @@ struct SalatStreaksView: View {
     private var youEntry: StreakEntry {
         let today = store.record(for: Date())
         return StreakEntry(id: "you", name: "You", streak: store.streak,
-                           completedToday: today.fard, isYou: true)
+                           completedToday: today.fard, isYou: true,
+                           avatar: auth.avatarData)
     }
 
     /// You + friends, ranked by streak.
@@ -126,7 +127,7 @@ private struct StreakRow: View {
                 .foregroundStyle(Theme.subtle)
                 .frame(width: 18)
 
-            Avatar(initials: entry.initials, filled: entry.isYou)
+            AvatarView(initials: entry.initials, imageData: entry.avatar, filled: entry.isYou)
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(entry.name)
@@ -164,21 +165,6 @@ private struct StreakRow: View {
             RoundedRectangle(cornerRadius: 20, style: .continuous)
                 .strokeBorder(entry.isYou ? Theme.primary.opacity(0.55) : .clear, lineWidth: 1.5)
         )
-    }
-}
-
-private struct Avatar: View {
-    let initials: String
-    var filled: Bool = false
-
-    var body: some View {
-        Text(initials)
-            .font(.subheadline.weight(.bold))
-            .foregroundStyle(filled ? .white : Theme.primary)
-            .frame(width: 42, height: 42)
-            .background(
-                Circle().fill(filled ? AnyShapeStyle(Theme.primary) : AnyShapeStyle(Theme.primary.opacity(0.15)))
-            )
     }
 }
 
@@ -246,7 +232,7 @@ private struct AddFriendSheet: View {
 
             ForEach(requests, id: \.self) { requester in
                 HStack(spacing: 12) {
-                    Avatar(initials: initials(requester))
+                    AvatarView(initials: initials(requester))
                     Text(requester)
                         .font(.headline)
                         .foregroundStyle(Theme.text)
@@ -351,7 +337,7 @@ private struct AddFriendSheet: View {
 
             ForEach(friends) { friend in
                 HStack(spacing: 12) {
-                    Avatar(initials: initials(friend.name))
+                    AvatarView(initials: initials(friend.name), imageData: friend.avatar)
                     Text(friend.name)
                         .font(.headline)
                         .foregroundStyle(Theme.text)

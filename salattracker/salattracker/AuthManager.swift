@@ -12,6 +12,7 @@ import Combine
 final class AuthManager: ObservableObject {
     @Published private(set) var username: String?
     @Published private(set) var friendCode: String?
+    @Published private(set) var avatarData: Data?
     @Published var errorMessage: String?
     @Published var isWorking = false
 
@@ -43,6 +44,7 @@ final class AuthManager: ObservableObject {
         guard let token else { return }
         if let me = try? await api.me(token: token) {
             friendCode = me.friendCode
+            avatarData = me.avatar.flatMap { Data(base64Encoded: $0) }
         }
     }
 
@@ -54,7 +56,8 @@ final class AuthManager: ObservableObject {
                 id: $0.username,
                 name: $0.username,
                 streak: $0.streak,
-                completedToday: Set($0.completedToday.compactMap(Prayer.init(rawValue:)))
+                completedToday: Set($0.completedToday.compactMap(Prayer.init(rawValue:))),
+                avatar: $0.avatar.flatMap { Data(base64Encoded: $0) }
             )
         }
     }
@@ -85,11 +88,33 @@ final class AuthManager: ObservableObject {
         try await api.removeFriend(username: username, token: token)
     }
 
-    func register(username: String, password: String) async {
+    func register(username: String, password: String, avatar: Data? = nil) async {
         await perform {
             try await api.register(username: username, password: password)
             let auth = try await api.login(username: username, password: password)
             finishSignIn(auth)
+            // Upload the chosen profile picture, if any, now that we're signed in.
+            if let avatar, let token {
+                try await api.setAvatar(jpeg: avatar, token: token)
+                avatarData = avatar
+            }
+        }
+    }
+
+    /// Set or replace the signed-in user's profile picture (a small JPEG).
+    func setAvatar(_ jpeg: Data) async {
+        guard let token else { return }
+        await perform {
+            try await api.setAvatar(jpeg: jpeg, token: token)
+            avatarData = jpeg
+        }
+    }
+
+    func removeAvatar() async {
+        guard let token else { return }
+        await perform {
+            try await api.removeAvatar(token: token)
+            avatarData = nil
         }
     }
 
@@ -98,6 +123,8 @@ final class AuthManager: ObservableObject {
             let auth = try await api.login(username: username, password: password)
             finishSignIn(auth)
         }
+        // Load the account's profile picture (not part of the login response).
+        if isSignedIn { await refreshMe() }
     }
 
     func signOut() {
@@ -120,6 +147,7 @@ final class AuthManager: ObservableObject {
     private func clearSession() {
         token = nil
         username = nil
+        avatarData = nil
         UserDefaults.standard.removeObject(forKey: Keys.token)
         UserDefaults.standard.removeObject(forKey: Keys.username)
         store.endSession()
@@ -129,6 +157,7 @@ final class AuthManager: ObservableObject {
         token = auth.token
         username = auth.username
         friendCode = auth.friendCode
+        avatarData = nil   // cleared now; loaded fresh for this account via refreshMe
         UserDefaults.standard.set(auth.token, forKey: Keys.token)
         UserDefaults.standard.set(auth.username, forKey: Keys.username)
         store.startSession(username: auth.username, token: auth.token)

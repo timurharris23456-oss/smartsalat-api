@@ -69,6 +69,14 @@ class RespondBody(BaseModel):
     username: str
 
 
+class AvatarBody(BaseModel):
+    avatar: str   # a base64-encoded JPEG (small, square); the app resizes before upload
+
+
+# Reject oversized avatars (base64 chars). ~256px JPEG is well under this.
+MAX_AVATAR_CHARS = 400_000
+
+
 # ------------------------------------------------------------------ Helpers
 
 # In-memory sliding-window rate limiting. Per-process, which is fine for the
@@ -138,7 +146,7 @@ def streak_from_records(day_records: dict, today) -> int:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "version": "5-unfriend"}
+    return {"ok": True, "version": "6-avatar"}
 
 
 # ------------------------------------------------------------- Public pages
@@ -347,7 +355,27 @@ def logout(authorization: str = Header(default="")):
 @app.get("/me")
 def me(username: str = Depends(current_user)):
     user = users.find_one({"_id": username}) or {}
-    return {"username": username, "friendCode": user.get("friendCode", "")}
+    return {
+        "username": username,
+        "friendCode": user.get("friendCode", ""),
+        "avatar": user.get("avatar"),
+    }
+
+
+@app.put("/avatar")
+def set_avatar(body: AvatarBody, username: str = Depends(current_user)):
+    """Set or replace the user's profile picture (base64-encoded JPEG)."""
+    if len(body.avatar) > MAX_AVATAR_CHARS:
+        raise HTTPException(status_code=413, detail="Image is too large")
+    users.update_one({"_id": username}, {"$set": {"avatar": body.avatar}})
+    return {"ok": True}
+
+
+@app.delete("/avatar", status_code=204)
+def delete_avatar(username: str = Depends(current_user)):
+    """Remove the user's profile picture."""
+    users.update_one({"_id": username}, {"$unset": {"avatar": ""}})
+    return None
 
 
 @app.delete("/account", status_code=204)
@@ -482,6 +510,7 @@ def list_friends(username: str = Depends(current_user)):
             "username": name,
             "streak": streak_from_records(day_records, today),
             "completedToday": day_records.get(today.isoformat(), {}).get("fard", []),
+            "avatar": friend_docs.get(name, {}).get("avatar"),
         })
     friends.sort(key=lambda f: f["streak"], reverse=True)
     return {"friends": friends}
