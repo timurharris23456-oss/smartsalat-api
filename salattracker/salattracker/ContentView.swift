@@ -141,15 +141,16 @@ struct ContentView: View {
             VStack(spacing: 24) {
                 header
                 AyahOfTheDayView(
-                    ayah: AyahLibrary.ayah(on: now, afterFajr: store.todayTimes[.fajr]),
-                    userName: auth.username
+                    ayah: AyahLibrary.ayah(on: now),
+                    userName: auth.username,
+                    now: now
                 )
                 streakHero
                 prayerList
                 locationFootnote
                     .padding(.top, 4)
             }
-            .animation(.easeInOut(duration: 0.4), value: AyahLibrary.ayah(on: now, afterFajr: store.todayTimes[.fajr]))
+            .animation(.easeInOut(duration: 0.4), value: AyahLibrary.ayah(on: now))
             .padding(.horizontal)
             .padding(.bottom, 16)
             .onAppear { appeared = true }

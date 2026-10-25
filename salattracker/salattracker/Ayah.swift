@@ -17,13 +17,9 @@ struct Ayah: Identifiable, Hashable {
 }
 
 enum AyahLibrary {
-    /// The ayah for a given day. The day is considered to begin at Fajr, so
-    /// before Fajr the previous day's ayah is shown; after Fajr the new one.
-    static func ayah(on date: Date, afterFajr fajr: Date?, calendar: Calendar = .current) -> Ayah {
-        var day = calendar.startOfDay(for: date)
-        if let fajr, date < fajr {
-            day = calendar.date(byAdding: .day, value: -1, to: day) ?? day
-        }
+    /// The ayah for a given day, rolling over at the user's local midnight.
+    static func ayah(on date: Date, calendar: Calendar = .current) -> Ayah {
+        let day = calendar.startOfDay(for: date)
         let dayNumber = Int((day.timeIntervalSince1970 / 86400).rounded(.down))
         let count = all.count
         return all[((dayNumber % count) + count) % count]
