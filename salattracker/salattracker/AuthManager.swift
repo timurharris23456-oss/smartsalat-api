@@ -80,6 +80,11 @@ final class AuthManager: ObservableObject {
         try await api.declineFriend(username: username, token: token)
     }
 
+    func removeFriend(_ username: String) async throws {
+        guard let token else { return }
+        try await api.removeFriend(username: username, token: token)
+    }
+
     func register(username: String, password: String) async {
         await perform {
             try await api.register(username: username, password: password)

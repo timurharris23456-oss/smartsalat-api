@@ -16,3 +16,6 @@ salattracker/build/
 # Claude Code tooling & local docs (not app code)
 .claude/
 Claude.pdf
+
+# Unrelated local directory (not part of the app)
+Windowed/

@@ -138,7 +138,7 @@ def streak_from_records(day_records: dict, today) -> int:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "version": "4-account"}
+    return {"ok": True, "version": "5-unfriend"}
 
 
 # ------------------------------------------------------------- Public pages
@@ -449,6 +449,15 @@ def decline_friend(body: RespondBody, username: str = Depends(current_user)):
     requester = body.username.strip().lower()
     users.update_one({"_id": username}, {"$pull": {"incomingRequests": requester}})
     return {"declined": requester}
+
+
+@app.post("/friends/remove")
+def remove_friend(body: RespondBody, username: str = Depends(current_user)):
+    """Remove a mutual friendship from both users' friend lists."""
+    friend = body.username.strip().lower()
+    users.update_one({"_id": username}, {"$pull": {"friends": friend}})
+    users.update_one({"_id": friend}, {"$pull": {"friends": username}})
+    return {"removed": friend}
 
 
 @app.get("/friends")

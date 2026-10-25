@@ -125,6 +125,10 @@ struct APIClient {
         _ = try await send("/friends/decline", method: "POST", body: ["username": username], token: token)
     }
 
+    func removeFriend(username: String, token: String) async throws {
+        _ = try await send("/friends/remove", method: "POST", body: ["username": username], token: token)
+    }
+
     // MARK: - Transport
 
     @discardableResult

@@ -188,6 +188,8 @@ private struct AddFriendSheet: View {
     let onChanged: () -> Void
 
     @State private var requests: [String] = []
+    @State private var friends: [StreakEntry] = []
+    @State private var friendToRemove: String?
     @State private var code = ""
     @State private var infoMessage: String?
     @State private var errorMessage: String?
@@ -202,6 +204,9 @@ private struct AddFriendSheet: View {
                     }
                     yourCodeSection
                     addByCodeSection
+                    if !friends.isEmpty {
+                        yourFriendsSection
+                    }
                     Spacer()
                 }
                 .padding()
@@ -214,7 +219,19 @@ private struct AddFriendSheet: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .task { await loadRequests() }
+            .task { await load() }
+            .confirmationDialog(
+                "Remove this friend?",
+                isPresented: Binding(get: { friendToRemove != nil },
+                                     set: { if !$0 { friendToRemove = nil } }),
+                titleVisibility: .visible,
+                presenting: friendToRemove
+            ) { friend in
+                Button("Remove \(friend)", role: .destructive) { removeFriend(friend) }
+                Button("Cancel", role: .cancel) {}
+            } message: { _ in
+                Text("You'll both be removed from each other's friends list. You can add them again later with their code.")
+            }
         }
     }
 
@@ -323,10 +340,56 @@ private struct AddFriendSheet: View {
         }
     }
 
+    // MARK: - Your friends
+
+    private var yourFriendsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("YOUR FRIENDS")
+                .font(.caption.weight(.bold))
+                .tracking(1)
+                .foregroundStyle(Theme.subtle)
+
+            ForEach(friends) { friend in
+                HStack(spacing: 12) {
+                    Avatar(initials: initials(friend.name))
+                    Text(friend.name)
+                        .font(.headline)
+                        .foregroundStyle(Theme.text)
+                    Spacer()
+                    Button(role: .destructive) {
+                        friendToRemove = friend.id
+                    } label: {
+                        Image(systemName: "person.badge.minus")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.red)
+                            .frame(width: 36, height: 36)
+                            .background(Color.red.opacity(0.12), in: Circle())
+                    }
+                    .accessibilityLabel("Remove \(friend.name)")
+                }
+                .padding(12)
+                .softCard(cornerRadius: 18)
+            }
+        }
+    }
+
     // MARK: - Actions
 
-    private func loadRequests() async {
+    private func load() async {
         requests = (try? await auth.friendRequests()) ?? []
+        friends = (try? await auth.friends()) ?? []
+    }
+
+    private func removeFriend(_ username: String) {
+        Task {
+            do {
+                try await auth.removeFriend(username)
+                friends.removeAll { $0.id == username }
+                onChanged()
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 
     private func sendRequest() {
