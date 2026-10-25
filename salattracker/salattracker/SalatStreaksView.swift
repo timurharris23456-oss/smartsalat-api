@@ -12,6 +12,9 @@ struct SalatStreaksView: View {
     @State private var friends: [StreakEntry] = []
     @State private var requests: [String] = []
     @State private var showAddFriend = false
+    @State private var loadState: LoadState = .loading
+
+    private enum LoadState { case loading, loaded, failed }
 
     private var youEntry: StreakEntry {
         let today = store.record(for: Date())
@@ -31,7 +34,11 @@ struct SalatStreaksView: View {
                 header
 
                 if friends.isEmpty {
-                    emptyState
+                    switch loadState {
+                    case .loading: loadingView
+                    case .failed:  failedView
+                    case .loaded:  emptyState
+                    }
                 }
 
                 ForEach(Array(ranked.enumerated()), id: \.element.id) { index, entry in
@@ -41,16 +48,62 @@ struct SalatStreaksView: View {
             .padding()
             .padding(.bottom, 12)
         }
-        .task { await loadAll() }
-        .refreshable { await loadAll() }
+        .task { await load() }
+        .refreshable { await load() }
         .sheet(isPresented: $showAddFriend) {
-            AddFriendSheet(onChanged: { Task { await loadAll() } })
+            AddFriendSheet(onChanged: { Task { await load() } })
         }
     }
 
-    private func loadAll() async {
-        if let loaded = try? await auth.friends() { friends = loaded }
-        if let loaded = try? await auth.friendRequests() { requests = loaded }
+    /// Load friends (and requests), retrying a few times so a cold server start
+    /// doesn't leave the list looking empty. The spinner only shows when there's
+    /// nothing on screen yet, so pull-to-refresh stays quiet.
+    private func load() async {
+        if friends.isEmpty { loadState = .loading }
+        for attempt in 0..<4 {
+            if Task.isCancelled { return }
+            do {
+                let loaded = try await auth.friends()
+                friends = loaded
+                requests = (try? await auth.friendRequests()) ?? []
+                loadState = .loaded
+                return
+            } catch {
+                if attempt == 3 {
+                    loadState = .failed
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+            }
+        }
+    }
+
+    private var loadingView: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+            Text("Loading your friends…")
+                .font(.subheadline)
+                .foregroundStyle(Theme.subtle)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
+    }
+
+    private var failedView: some View {
+        VStack(spacing: 10) {
+            Text("Couldn't load your friends.")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Theme.subtle)
+            Button {
+                Task { await load() }
+            } label: {
+                Text("Try Again")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.primary)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 28)
     }
 
     // MARK: - Pieces
