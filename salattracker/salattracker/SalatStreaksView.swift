@@ -59,7 +59,16 @@ struct SalatStreaksView: View {
     /// doesn't leave the list looking empty. The spinner only shows when there's
     /// nothing on screen yet, so pull-to-refresh stays quiet.
     private func load() async {
-        if friends.isEmpty { loadState = .loading }
+        // Show the last-synced friends from the cache instantly, then refresh.
+        if friends.isEmpty {
+            let cached = auth.cachedFriends()
+            if cached.isEmpty {
+                loadState = .loading
+            } else {
+                friends = cached
+                loadState = .loaded
+            }
+        }
         for attempt in 0..<4 {
             if Task.isCancelled { return }
             do {
@@ -70,7 +79,9 @@ struct SalatStreaksView: View {
                 return
             } catch {
                 if attempt == 3 {
-                    loadState = .failed
+                    // Keep showing cached friends if we have them; only surface an
+                    // error when there's nothing on screen.
+                    if friends.isEmpty { loadState = .failed }
                     return
                 }
                 try? await Task.sleep(nanoseconds: 1_500_000_000)

@@ -121,15 +121,16 @@ struct SettingsView: View {
             }
 
             Section {
+                let hasPhoto = auth.avatarData != nil
                 HStack(spacing: 16) {
                     AvatarView(initials: avatarInitials, imageData: auth.avatarData, size: 60)
                     VStack(alignment: .leading, spacing: 6) {
                         PhotosPicker(selection: $avatarItem, matching: .images) {
-                            Text(auth.avatarData == nil ? "Add Photo" : "Change Photo")
+                            Text(hasPhoto ? "Change Photo" : "Add Photo")
                                 .font(.subheadline.weight(.semibold))
                                 .foregroundStyle(Theme.primary)
                         }
-                        if auth.avatarData != nil {
+                        if hasPhoto {
                             Button(role: .destructive) {
                                 Task { await auth.removeAvatar() }
                             } label: {
