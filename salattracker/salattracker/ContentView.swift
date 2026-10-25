@@ -141,7 +141,8 @@ struct ContentView: View {
             VStack(spacing: 24) {
                 header
                 AyahOfTheDayView(
-                    ayah: AyahLibrary.ayah(on: now, afterFajr: store.todayTimes[.fajr])
+                    ayah: AyahLibrary.ayah(on: now, afterFajr: store.todayTimes[.fajr]),
+                    userName: auth.username
                 )
                 streakHero
                 prayerList

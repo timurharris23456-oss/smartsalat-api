@@ -7,13 +7,22 @@ import SwiftUI
 
 struct AyahOfTheDayView: View {
     let ayah: Ayah
+    var userName: String? = nil
+
+    /// "[Name]'s Personal Ayah", falling back to "Personal Ayah" when signed out.
+    private var title: String {
+        if let userName, !userName.isEmpty {
+            return "\(userName)'s Personal Ayah"
+        }
+        return "Personal Ayah"
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Image(systemName: "book.closed.fill")
                     .font(.caption)
-                Text("Ayah of the Day")
+                Text(title)
                     .font(.caption.weight(.bold))
                     .textCase(.uppercase)
                     .tracking(0.5)
@@ -49,7 +58,7 @@ struct AyahOfTheDayView: View {
 #Preview {
     ZStack {
         Theme.background.ignoresSafeArea()
-        AyahOfTheDayView(ayah: AyahLibrary.all[1])
+        AyahOfTheDayView(ayah: AyahLibrary.all[1], userName: "Aisha")
             .padding()
     }
 }
