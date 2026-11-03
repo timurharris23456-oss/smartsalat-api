@@ -300,9 +300,19 @@ private struct StreakRow: View {
             AvatarView(initials: entry.initials, imageData: entry.avatar, filled: entry.isYou)
 
             VStack(alignment: .leading, spacing: 5) {
-                Text(entry.name)
-                    .font(.headline)
-                    .foregroundStyle(Theme.text)
+                HStack(spacing: 5) {
+                    Text(entry.name)
+                        .font(.headline)
+                        .foregroundStyle(Theme.text)
+                    if entry.isComplete {
+                        Image("all5_badge")
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 19, height: 19)
+                            .clipShape(Circle())
+                            .accessibilityLabel("Completed all 5 prayers today")
+                    }
+                }
                 HStack(spacing: 6) {
                     ForEach(Prayer.allCases) { prayer in
                         Circle()
