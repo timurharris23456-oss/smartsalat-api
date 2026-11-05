@@ -46,6 +46,14 @@ struct APIClient {
         var witr: Bool
     }
 
+    /// A month of a user's daily prayer counts (date -> count) plus the total.
+    struct FriendCalendar: Codable {
+        let username: String
+        let month: String
+        let days: [String: Int]
+        let total: Int
+    }
+
     enum APIError: LocalizedError {
         case server(String)
         case unreachable
@@ -152,6 +160,14 @@ struct APIClient {
                            body: ["username": username, "prayer": prayer], token: token)
     }
 
+    /// A month (YYYY-MM) of a user's prayer counts — yourself or a friend.
+    func friendCalendar(username: String, month: String, token: String) async throws -> FriendCalendar {
+        let data = try await send("/friends/calendar", method: "GET", body: nil, token: token,
+                                  query: [URLQueryItem(name: "username", value: username),
+                                          URLQueryItem(name: "month", value: month)])
+        return try JSONDecoder().decode(FriendCalendar.self, from: data)
+    }
+
     // MARK: - Profile picture
 
     /// Upload a profile picture (a small JPEG, base64-encoded for transport).
@@ -167,8 +183,14 @@ struct APIClient {
     // MARK: - Transport
 
     @discardableResult
-    private func send(_ path: String, method: String, body: [String: Any]?, token: String? = nil) async throws -> Data {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+    private func send(_ path: String, method: String, body: [String: Any]?, token: String? = nil,
+                      query: [URLQueryItem]? = nil) async throws -> Data {
+        var url = baseURL.appendingPathComponent(path)
+        if let query, var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+            comps.queryItems = query
+            url = comps.url ?? url
+        }
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         if let token {

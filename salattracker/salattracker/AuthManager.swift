@@ -109,6 +109,12 @@ final class AuthManager: ObservableObject {
         try await api.nudge(username: username, prayer: prayer, token: token)
     }
 
+    /// A month (YYYY-MM) of prayer counts for a user — yourself or a friend.
+    func calendar(for username: String, month: String) async throws -> APIClient.FriendCalendar {
+        guard let token else { return .init(username: username, month: month, days: [:], total: 0) }
+        return try await api.friendCalendar(username: username, month: month, token: token)
+    }
+
     // MARK: - Push notifications
 
     /// Ask for notification permission and register for remote (push) delivery.

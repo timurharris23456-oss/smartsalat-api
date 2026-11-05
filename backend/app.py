@@ -10,6 +10,7 @@ Run:
 
 import os
 import random
+import re
 import secrets
 import time
 from collections import defaultdict, deque
@@ -30,6 +31,7 @@ SESSION_TTL_DAYS = 180
 
 PRAYERS = ["fajr", "dhuhr", "asr", "maghrib", "isha"]
 PRAYER_NAMES = {p: p.capitalize() for p in PRAYERS}
+MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
 
 client = MongoClient(os.environ["MONGODB_URI"])
 db = client[os.environ.get("MONGODB_DB", "smartsalat")]
@@ -229,7 +231,7 @@ def streak_from_records(day_records: dict, today) -> int:
 
 @app.get("/health")
 def health():
-    return {"ok": True, "version": "8-nudge"}
+    return {"ok": True, "version": "9-calendar"}
 
 
 # ------------------------------------------------------------- Public pages
@@ -672,3 +674,26 @@ def list_friends(username: str = Depends(current_user)):
         })
     friends.sort(key=lambda f: f["streak"], reverse=True)
     return {"friends": friends}
+
+
+@app.get("/friends/calendar")
+def friend_calendar(username: str, month: str, viewer: str = Depends(current_user)):
+    """A month of a user's daily fard-prayer counts. Allowed for yourself or a
+    friend. `month` is YYYY-MM; returns {date: count} for days with >=1 prayer
+    plus the month total."""
+    if not MONTH_RE.match(month):
+        raise HTTPException(status_code=400, detail="month must be YYYY-MM")
+    target = username.strip().lower()
+    if target != viewer:
+        me = users.find_one({"_id": viewer}) or {}
+        if target not in me.get("friends", []):
+            raise HTTPException(status_code=403, detail="You can only view your friends")
+
+    days: dict[str, int] = {}
+    total = 0
+    for rec in records_col.find({"userId": target, "date": {"$regex": f"^{month}-"}}):
+        count = len(rec.get("fard", []))
+        if count > 0:
+            days[rec["date"]] = count
+            total += count
+    return {"username": target, "month": month, "days": days, "total": total}

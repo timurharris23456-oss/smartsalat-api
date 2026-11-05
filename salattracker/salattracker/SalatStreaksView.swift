@@ -15,6 +15,7 @@ struct SalatStreaksView: View {
     @State private var loadState: LoadState = .loading
     @State private var reportTarget: String?
     @State private var removeTarget: String?
+    @State private var profileEntry: StreakEntry?
 
     private enum LoadState { case loading, loaded, failed }
 
@@ -45,12 +46,14 @@ struct SalatStreaksView: View {
 
                 ForEach(Array(ranked.enumerated()), id: \.element.id) { index, entry in
                     if entry.isYou {
-                        StreakRow(rank: index + 1, entry: entry)
+                        StreakRow(rank: index + 1, entry: entry,
+                                  onOpen: { profileEntry = entry })
                     } else {
                         StreakRow(rank: index + 1, entry: entry,
                                   onReport: { reportTarget = entry.name },
                                   onRemove: { removeTarget = entry.name },
-                                  onNudge: { prayer in nudge(entry.name, prayer) })
+                                  onNudge: { prayer in nudge(entry.name, prayer) },
+                                  onOpen: { profileEntry = entry })
                     }
                 }
             }
@@ -61,6 +64,9 @@ struct SalatStreaksView: View {
         .refreshable { await load() }
         .sheet(isPresented: $showAddFriend) {
             AddFriendSheet(onChanged: { Task { await load() } })
+        }
+        .sheet(item: $profileEntry) { entry in
+            ProfileCalendarView(entry: entry)
         }
         .confirmationDialog(
             "Report this profile photo?",
@@ -233,13 +239,18 @@ private struct StreakRow: View {
     var onReport: (() -> Void)? = nil
     var onRemove: (() -> Void)? = nil
     var onNudge: ((Prayer) -> Void)? = nil
+    var onOpen: (() -> Void)? = nil
 
     var body: some View {
-        if onReport != nil || onRemove != nil {
-            rowContent.contextMenu { menu }
-        } else {
-            rowContent
+        Group {
+            if onReport != nil || onRemove != nil {
+                rowContent.contextMenu { menu }
+            } else {
+                rowContent
+            }
         }
+        .contentShape(Rectangle())
+        .onTapGesture { onOpen?() }
     }
 
     @ViewBuilder private var menu: some View {
