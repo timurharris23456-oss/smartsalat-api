@@ -58,16 +58,7 @@ final class AuthManager: ObservableObject {
     /// The user's friends, as leaderboard entries.
     func friends() async throws -> [StreakEntry] {
         guard let token else { return [] }
-        let remote = try await api.fetchFriends(token: token)
-        FriendsCache.save(remote, for: username)
-        return remote.map(Self.entry(from:))
-    }
-
-    /// The last-synced friends, loaded from the on-device cache so the list can
-    /// appear instantly on launch while a fresh copy loads in the background.
-    func cachedFriends() -> [StreakEntry] {
-        guard let username else { return [] }
-        return FriendsCache.load(for: username).map(Self.entry(from:))
+        return try await api.fetchFriends(token: token).map(Self.entry(from:))
     }
 
     private static func entry(from f: APIClient.RemoteFriend) -> StreakEntry {
@@ -185,7 +176,6 @@ final class AuthManager: ObservableObject {
         guard let token else { return }
         await perform {
             try await api.deleteAccount(token: token)
-            FriendsCache.clear(for: username)
             clearSession()
         }
     }
@@ -224,33 +214,5 @@ final class AuthManager: ObservableObject {
             errorMessage = error.localizedDescription
         }
         isWorking = false
-    }
-}
-
-/// A small on-device cache of the last-synced friends, stored per user as JSON
-/// in the caches directory so the leaderboard can render instantly on launch.
-private enum FriendsCache {
-    private static func fileURL(for user: String) -> URL? {
-        let safe = user.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? user
-        let dir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
-        return dir?.appendingPathComponent("friends_\(safe).json")
-    }
-
-    static func save(_ friends: [APIClient.RemoteFriend], for user: String?) {
-        guard let user, let url = fileURL(for: user),
-              let data = try? JSONEncoder().encode(friends) else { return }
-        try? data.write(to: url, options: .atomic)
-    }
-
-    static func load(for user: String) -> [APIClient.RemoteFriend] {
-        guard let url = fileURL(for: user), let data = try? Data(contentsOf: url),
-              let list = try? JSONDecoder().decode([APIClient.RemoteFriend].self, from: data)
-        else { return [] }
-        return list
-    }
-
-    static func clear(for user: String?) {
-        guard let user, let url = fileURL(for: user) else { return }
-        try? FileManager.default.removeItem(at: url)
     }
 }
