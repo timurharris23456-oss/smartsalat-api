@@ -231,12 +231,28 @@ struct SettingsView: View {
     }
 
     private func cityResult(from item: MKMapItem) -> City? {
-        let coordinate = item.location.coordinate
+        let coordinate: CLLocationCoordinate2D
+        let cityName: String?
+        let regionName: String?
+
+        if #available(iOS 26, *) {
+            coordinate = item.location.coordinate
+            let address = item.addressRepresentations
+            cityName = address?.cityWithContext
+            regionName = address?.regionName
+        } else {
+            // Pre-iOS-26: MKMapItem.placemark (an MKPlacemark / CLPlacemark)
+            // carries the same coordinate and address components synchronously.
+            let placemark = item.placemark
+            coordinate = placemark.coordinate
+            cityName = placemark.locality
+            regionName = placemark.country
+        }
+
         guard CLLocationCoordinate2DIsValid(coordinate) else { return nil }
-        let address = item.addressRepresentations
         return City(
-            name: address?.cityWithContext ?? item.name ?? cityQuery,
-            country: address?.regionName ?? "",
+            name: cityName ?? item.name ?? cityQuery,
+            country: regionName ?? "",
             latitude: coordinate.latitude,
             longitude: coordinate.longitude,
             timeZoneID: item.timeZone?.identifier ?? TimeZone.current.identifier
